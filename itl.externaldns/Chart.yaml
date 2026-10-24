@@ -1,0 +1,10 @@
+apiVersion: v2
+name: itl-externaldns
+description: external-dns for the ITL Talos cluster - RFC2136/BIND dynamic DNS sync for internal zones, wrapper chart around the upstream external-dns chart
+type: application
+version: 0.1.0
+appVersion: "0.23.0"
+dependencies:
+  - name: external-dns
+    version: "1.23.0"
+    repository: "https://kubernetes-sigs.github.io/external-dns/"
