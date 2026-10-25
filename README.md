@@ -2,7 +2,7 @@
 
 [external-dns](https://github.com/kubernetes-sigs/external-dns) for the ITL Talos cluster ([`ITlusions/ITL.K8s`](https://github.com/ITlusions/ITL.K8s)) - a thin wrapper chart around the upstream chart, same pattern as [`ITL.Cilium`](https://github.com/ITlusions/ITL.Cilium), [`ITL.Traefik`](https://github.com/ITlusions/ITL.Traefik), and [`ITL.K8s.MetricsServer`](https://github.com/ITlusions/ITL.K8s.MetricsServer). Syncs Kubernetes Service/Ingress/Gateway HTTPRoute hostnames into our self-hosted BIND server via RFC2136 dynamic DNS update - no cloud DNS provider involved.
 
-**Status: deployed and live**, confirmed working end-to-end 2026-10-24 (`RFC2136TSIGKeyName:externaldns-int`, zone `int.itlusions.nl`, "All records are already up to date" on first sync).
+**Status: deployed and live**, confirmed working end-to-end 2026-10-24 (`RFC2136TSIGKeyName:externaldns-int`, zone `int.itlusions.nl`, "All records are already up to date" on first sync). Scoped back down to just `k8s.int.itlusions.nl` on 2026-10-25 - see below.
 
 ## Moved here from `ITL.K8s`
 
@@ -19,17 +19,15 @@ Two separate RFC2136 keys exist on `pandora`, from two separate points in this p
 | Key | Grants update rights on | Used by |
 |---|---|---|
 | `externaldns` | `public.k8s.int.itlusions.com` only | An older, now-superseded external-dns deployment (pre-dates this chart) |
-| `externaldns-int` | `int.itlusions.nl`, `k8s.int.itlusions.nl`, `infra.int.itlusions.nl` | **This chart** |
+| `externaldns-int` | `k8s.int.itlusions.nl` only | **This chart** |
 
-Don't mix them up - the old key has no access to the zones this chart actually targets, and vice versa.
+Don't mix them up - the old key has no access to the zone this chart actually targets, and vice versa.
 
-## Scoped to all three zones the key is actually granted on
+## Scoped to just `k8s.int.itlusions.nl` - and why that's not "every zone this key can reach" anymore
 
-`domainFilters` and `--rfc2136-zone` are both set to all three: `int.itlusions.nl`, `k8s.int.itlusions.nl`, `infra.int.itlusions.nl` - matching exactly what `externaldns-int` is granted on BIND, confirmed via `external-dns --help` (`--rfc2136-zone` can be repeated).
+Briefly widened to all three zones (`int.itlusions.nl`, `k8s.int.itlusions.nl`, `infra.int.itlusions.nl`) on 2026-10-24, reverted the next day. The reason is structural, not a preference: on BIND, **any zone with an `update-policy` grant becomes a "dynamic zone"**, and a dynamic zone refuses `rndc reload` for its own file entirely - confirmed live, not theoretical. `int.itlusions.nl` and `infra.int.itlusions.nl` are meant to stay plain static zones that [`ITL.Bind.Config`](https://github.com/ITlusions/ITL.Bind.Config)'s git-file + CI-deploy pipeline manages directly; granting this key on them broke that pipeline's ability to manage them at all, and - worse - the pipeline's own unconditional "copy every zone file" step would have silently wiped any real record this chart ever wrote dynamically, on every single deploy of any other zone.
 
-**`k8s.int.itlusions.nl` and `infra.int.itlusions.nl` each need their own `--rfc2136-zone` entry, not just one for the parent.** Both are independently authoritative zones on BIND (separate zone files, separate `type master` blocks in `named.conf.local`) - `k8s.int.itlusions.nl` is NS-delegated from `int.itlusions.nl`'s apex, but a delegation only hands you glue, not the child zone's actual record data. AXFR'ing `int.itlusions.nl` alone would never surface what's inside `k8s.int.itlusions.nl` or `infra.int.itlusions.nl`.
-
-This is deliberately "every zone this key can reach," not "every zone on the server" - `public.k8s.int.itlusions.com` (old `externaldns` key) and the static `.com` zones (no grant at all) stay untouched regardless, because the TSIG key itself has no write access there. Narrowing back down later is a one-line config change, no BIND-side change needed.
+`k8s.int.itlusions.nl` is the only zone actually meant to be dynamic in the first place, and is the only one `domainFilters`/`--rfc2136-zone` target now. Its file in `ITL.Bind.Config` (`zones/db.k8s.int.itlusions.nl`) is kept only as a historical record of its one-time seed content - that pipeline no longer deploys it at all.
 
 ## Deploy
 
@@ -54,4 +52,4 @@ kubectl get pods -n external-dns
 kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns --tail=40
 ```
 
-Look for `Configured RFC2136 with zones '[int.itlusions.nl]'` and no `NOTAUTH`/`REFUSED` errors - those would mean the TSIG key/secret doesn't match what's actually granted on the server.
+Look for `Configured RFC2136 with zones '[k8s.int.itlusions.nl]'` and no `NOTAUTH`/`REFUSED` errors - those would mean the TSIG key/secret doesn't match what's actually granted on the server.

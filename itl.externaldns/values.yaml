@@ -11,16 +11,18 @@ external-dns:
     - ingress
     - gateway-httproute
 
-  # Scoped to exactly the three zones externaldns-int is actually granted
-  # on BIND (see ITL.Bind.Config's named.conf.local) - not "every zone on
-  # the server". public.k8s.int.itlusions.com (old externaldns key) and
-  # the static cnpg.*/int.itlusions.com zones (no grant for any key) stay
-  # out of reach regardless of this filter, because the TSIG key itself
-  # has no write access there.
+  # Scoped to exactly the one zone externaldns-int is actually granted on
+  # BIND (see ITL.Bind.Config's named.conf.local). Was briefly widened to
+  # all three zones (int.itlusions.nl, k8s.int.itlusions.nl,
+  # infra.int.itlusions.nl) - reverted 2026-10-25: a zone with ANY
+  # update-policy grant becomes "dynamic" to BIND, which then refuses
+  # `rndc reload` for that zone's file at all. int.itlusions.nl and
+  # infra.int.itlusions.nl needed to stay plain static zones that
+  # ITL.Bind.Config's git-file + CI-deploy pipeline can actually manage;
+  # k8s.int.itlusions.nl is the only one meant to be dynamic in the first
+  # place.
   domainFilters:
-    - int.itlusions.nl
     - k8s.int.itlusions.nl
-    - infra.int.itlusions.nl
 
   # One owner ID per cluster, so records from other clusters (or the old
   # externaldns key's zone) are left alone.
@@ -35,21 +37,11 @@ external-dns:
   extraArgs:
     - --rfc2136-host=192.168.1.241
     - --rfc2136-port=5354
-    # Three separate --rfc2136-zone entries, not one - k8s.int.itlusions.nl
-    # and infra.int.itlusions.nl are each their OWN independently
-    # authoritative zone on BIND (separate zone files), not reachable by
-    # AXFR'ing int.itlusions.nl alone. k8s.int.itlusions.nl is NS-
-    # delegated from int.itlusions.nl's apex, but the delegation only
-    # hands you the glue record, not the child zone's actual data -
-    # external-dns needs its own transfer of each zone to see inside it.
-    - --rfc2136-zone=int.itlusions.nl
     - --rfc2136-zone=k8s.int.itlusions.nl
-    - --rfc2136-zone=infra.int.itlusions.nl
     # externaldns-int, NOT the older "externaldns" key - that one only
     # has an update-policy grant on the old public.k8s.int.itlusions.com
     # zone. externaldns-int is the key actually granted on
-    # int.itlusions.nl / k8s.int.itlusions.nl / infra.int.itlusions.nl -
-    # see ITL.Bind.Config's named.conf.local.
+    # k8s.int.itlusions.nl - see ITL.Bind.Config's named.conf.local.
     - --rfc2136-tsig-keyname=externaldns-int
     - --rfc2136-tsig-secret-alg=hmac-sha256
     - --rfc2136-tsig-axfr
